@@ -17,9 +17,14 @@ interface SolveIKResult {
   handWorldPose: THREE.Vector3
 }
 
-interface CalibrationArmState {
-  rightArm: ArmBones
+interface ArmCouple {
+  bones: ArmBones
   length: ArmLength
+}
+
+interface CalibrationArmState {
+  rightArm: ArmCouple
+  leftArm: ArmCouple
 }
 
 export { ArmBones, ArmLength, CalibrationArmState, SolveIKResult }

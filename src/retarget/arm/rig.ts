@@ -1,46 +1,23 @@
 import { Quaternion, Vector3 } from 'three'
 import type { VRM } from '@pixiv/three-vrm'
 import type { CalibrationArmState } from '@/retarget/arm/types.ts'
-import type { VRMBones } from '@/retarget/types.ts'
 import { applyBoneRotation, processArmLandmarks, scaleLimbToModel } from '@/retarget/arm/utils.ts'
 import { solveBoneIK } from '@/retarget/arm/ik.ts'
+import type { ArmLandmarks, VRMLandmarks } from '@/retarget/types.ts'
 
-// Smooth quaternion transitions
-class QuaternionSmoother {
-  private lastQuat: Quaternion | null = null
-
-  smooth(q: Quaternion, weight = 0.3): Quaternion {
-    if (!this.lastQuat) {
-      this.lastQuat = q.clone()
-      return q
-    }
-
-    this.lastQuat.slerp(q, weight)
-    return this.lastQuat.clone()
-  }
-}
-
-const upperSmoother = new QuaternionSmoother()
-const lowerSmoother = new QuaternionSmoother()
-
-function retargetToVRMArm(
-  vrm: VRM,
-  calibration: CalibrationArmState,
-  extractedLandmarks: VRMBones,
-) {
-  // Convert MediaPipe landmarks to world positions
-  const processedArm = processArmLandmarks(vrm, extractedLandmarks, calibration.rightArm.upper)
+function animArm(vrm: VRM, armCalibration: ArmCouple, arm: ArmLandmarks) {
+  const processedRightArm = processArmLandmarks(vrm, arm, armCalibration.bones.upper)
 
   // Keep real elbow position for pole vector
-  const realElbowPos = processedArm.lower.clone()
+  const realElbowPos = processedRightArm.lower.clone()
 
   // Scale to match model bone lengths
   const scaled = scaleLimbToModel(
-    processedArm.upper,
-    processedArm.lower,
-    processedArm.hand,
-    calibration.length.upper,
-    calibration.length.lower,
+    processedRightArm.upper,
+    processedRightArm.lower,
+    processedRightArm.hand,
+    armCalibration.length.upper,
+    armCalibration.length.lower,
   )
 
   // Use real elbow as pole vector
@@ -55,8 +32,8 @@ function retargetToVRMArm(
     scaled.base,
     scaled.tip,
     pole,
-    calibration.length.upper,
-    calibration.length.lower,
+    armCalibration.length.upper,
+    armCalibration.length.lower,
     upHintForShoulder,
     upHintForElbow,
   )
@@ -64,22 +41,34 @@ function retargetToVRMArm(
   let worldUpper = ik.upperQuaternion.clone()
   let worldLower = ik.lowerQuaternion.clone()
 
-  // Apply smoothing
-  worldUpper = upperSmoother.smooth(worldUpper, 0.4)
-  worldLower = lowerSmoother.smooth(worldLower, 0.4)
-
   // Apply rotations to bones
-  const parentWorldQuatUpper = calibration.rightArm.upper.parent!.getWorldQuaternion(
+  const parentWorldQuatUpper = armCalibration.bones.upper.parent!.getWorldQuaternion(
     new Quaternion(),
   )
 
-  applyBoneRotation(calibration.rightArm.upper, worldUpper, parentWorldQuatUpper)
+  applyBoneRotation(armCalibration.bones.upper, worldUpper, parentWorldQuatUpper)
 
-  const upperWorldQuatNow = calibration.rightArm.upper.getWorldQuaternion(new Quaternion())
-  applyBoneRotation(calibration.rightArm.lower, worldLower, upperWorldQuatNow)
+  const upperWorldQuatNow = armCalibration.bones.upper.getWorldQuaternion(new Quaternion())
+  applyBoneRotation(armCalibration.bones.lower, worldLower, upperWorldQuatNow)
 
   // Update matrices
-  calibration.rightArm.upper.parent!.updateWorldMatrix(true, true)
+  armCalibration.bones.upper.parent!.updateWorldMatrix(true, true)
+}
+
+function retargetToVRMArm(
+  vrm: VRM,
+  calibration: CalibrationArmState,
+  extractedLandmarks: VRMLandmarks,
+) {
+  // RightArm
+
+  animArm(vrm, calibration.rightArm, extractedLandmarks.rightArm)
+
+  vrm.scene.updateMatrixWorld(true)
+  // LeftArm
+  // vrm.scene.updateMatrixWorld(true)
+  animArm(vrm, calibration.leftArm, extractedLandmarks.leftArm)
+  // vrm.scene.updateMatrixWorld(true)
 }
 
 export { retargetToVRMArm }

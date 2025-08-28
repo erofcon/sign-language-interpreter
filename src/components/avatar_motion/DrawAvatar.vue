@@ -12,7 +12,7 @@ const mediaPipeStore = useMediaPipeStore()
 
 const armCalibration = ref<CalibrationArmState | null>(null)
 
-const modelUrl = 'AvatarSample_A.vrm'
+const modelUrl = 'real.vrm'
 
 watch(
   () => mediaPipeStore.state.keyPoints,

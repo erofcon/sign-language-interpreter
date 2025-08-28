@@ -1,26 +1,49 @@
 import { Object3D, Quaternion, Vector3 } from 'three'
 import { type VRM, VRMHumanBoneName } from '@pixiv/three-vrm'
-import type { ArmBones, ArmLength } from '@/retarget/arm/types.ts'
-import type { VRMBones } from '@/retarget/types.ts'
+import type { ArmBones, ArmLength, CalibrationArmState } from '@/retarget/arm/types.ts'
+import type { ArmLandmarks } from '@/retarget/types.ts'
 
 const EPS = 1e-6
 
 // Get arm bones from VRM humanoid
-function getArmBones(vrm: VRM): ArmBones {
+function getArmBones(vrm: VRM): CalibrationArmState {
   const humanoid = vrm.humanoid
   if (!humanoid) {
     console.log('humanoid not found')
     return
   }
 
-  const upper = VRMHumanBoneName.RightUpperArm
-  const lower = VRMHumanBoneName.RightLowerArm
-  const hand = VRMHumanBoneName.RightHand
+  const rightUpper = VRMHumanBoneName.RightUpperArm
+  const rightLower = VRMHumanBoneName.RightLowerArm
+  const rightHand = VRMHumanBoneName.RightHand
+
+  const leftUpper = VRMHumanBoneName.LeftUpperArm
+  const leftLower = VRMHumanBoneName.LeftLowerArm
+  const leftHand = VRMHumanBoneName.LeftHand
 
   return {
-    upper: humanoid.getNormalizedBoneNode(upper),
-    lower: humanoid.getNormalizedBoneNode(lower),
-    hand: humanoid.getNormalizedBoneNode(hand),
+    rightArm: {
+      bones: {
+        upper: humanoid.getNormalizedBoneNode(rightUpper),
+        lower: humanoid.getNormalizedBoneNode(rightLower),
+        hand: humanoid.getNormalizedBoneNode(rightHand),
+      },
+      length: {
+        upper: null,
+        lower: null,
+      },
+    },
+    leftArm: {
+      bones: {
+        upper: humanoid.getNormalizedBoneNode(leftUpper),
+        lower: humanoid.getNormalizedBoneNode(leftLower),
+        hand: humanoid.getNormalizedBoneNode(leftHand),
+      },
+      length: {
+        upper: null,
+        lower: null,
+      },
+    },
   }
 }
 
@@ -30,13 +53,13 @@ function computeArmBoneWorldLengths(bones: ArmBones): ArmLength {
   const b = new Vector3()
   const c = new Vector3()
 
-  bones.upper?.updateWorldMatrix(true, true)
-  bones.lower?.updateWorldMatrix(true, true)
-  bones.hand?.updateWorldMatrix(true, true)
+  bones.upper.updateWorldMatrix(true, true)
+  bones.lower.updateWorldMatrix(true, true)
+  bones.hand.updateWorldMatrix(true, true)
 
-  bones.upper?.getWorldPosition(a)
-  bones.lower?.getWorldPosition(b)
-  bones.hand?.getWorldPosition(c)
+  bones.upper.getWorldPosition(a)
+  bones.lower.getWorldPosition(b)
+  bones.hand.getWorldPosition(c)
 
   const l1 = a.distanceTo(b)
   const l2 = b.distanceTo(c)
@@ -48,13 +71,13 @@ function computeArmBoneWorldLengths(bones: ArmBones): ArmLength {
 }
 
 // Convert MediaPipe landmarks to world positions
-function processArmLandmarks(vrm: VRM, landmarks: VRMBones, anchor: Object3D): ArmBones {
+function processArmLandmarks(vrm: VRM, bones: ArmLandmarks, anchor: Object3D): ArmLandmarks {
   const modelAnchorPos = anchor.getWorldPosition(new Vector3())
 
   // Get MediaPipe positions
-  const shoulderPos = landmarks.RightArm.upper
-  const elbowPos = landmarks.RightArm.lower
-  const handPos = landmarks.RightArm.hand
+  const shoulderPos = bones.upper
+  const elbowPos = bones.lower
+  const handPos = bones.hand
 
   // Scale factor for model size
   const scaleFactor = 1.5
