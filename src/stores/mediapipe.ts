@@ -8,7 +8,7 @@ interface MediaPipeState {
   isInitialized: boolean
   isLoading: boolean
   error: string | null
-  keyPoints: Results | null
+  keyPoints: Results
 }
 
 export const useMediaPipeStore = defineStore('mediapipe', () => {
