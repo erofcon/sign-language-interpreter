@@ -1,6 +1,7 @@
 import { Holistic, type Results } from '@mediapipe/holistic'
 import { defineStore } from 'pinia'
 import { computed, reactive, readonly } from 'vue'
+import { applyPoseCorrections } from '@/utils/poseCorrector.ts'
 
 let holisticInstance: Holistic | null = null
 
@@ -85,6 +86,30 @@ export const useMediaPipeStore = defineStore('mediapipe', () => {
   // hand landmarks
   const getRightHandLandmarks = computed(() => state.keyPoints?.rightHandLandmarks)
   const getLeftHandLandmarks = computed(() => state.keyPoints?.leftHandLandmarks)
+  const getCorrectedWorldPoseLandmarks = computed(() => {
+    const landmarks = getWorldPoseLandmarks.value
+    if (landmarks) {
+      return applyPoseCorrections(landmarks)
+    }
+    return undefined
+  })
+
+  const getPoseDataForRetargeting = computed(() => {
+    const worldLandmarks = state.keyPoints?.za
+    const screenLandmarks = state.keyPoints?.poseLandmarks
+
+    if (!worldLandmarks || !screenLandmarks) {
+      return {
+        correctedWorldLandmarks: [],
+        screenLandmarks: [],
+      }
+    }
+
+    return {
+      correctedWorldLandmarks: applyPoseCorrections(worldLandmarks),
+      screenLandmarks: screenLandmarks,
+    }
+  })
 
   return {
     //state
@@ -98,5 +123,9 @@ export const useMediaPipeStore = defineStore('mediapipe', () => {
     getIsReady,
     getPoseLandmarks,
     getWorldPoseLandmarks,
+    getRightHandLandmarks,
+    getLeftHandLandmarks,
+    getCorrectedWorldPoseLandmarks,
+    getPoseDataForRetargeting,
   }
 })

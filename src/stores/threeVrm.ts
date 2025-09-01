@@ -4,8 +4,9 @@ import { defineStore } from 'pinia'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
+import { type VRM, VRMHumanBoneName, VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm'
 
-import { type VRM, VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm'
+const ROTATE_VRM_ROOT_Y_180 = true
 
 let renderer: THREE.WebGLRenderer | null = null
 let scene: THREE.Scene | null = null
@@ -13,7 +14,6 @@ let camera: THREE.PerspectiveCamera | null = null
 let controls: OrbitControls | null = null
 let currentVrm: VRM | null = null
 let skeletonHelper: THREE.SkeletonHelper | null = null
-let dirLight: THREE.DirectionalLight | null = null
 let rafId: number | null = null
 const clock = new THREE.Clock()
 let resizeHandler: (() => void) | null = null
@@ -27,7 +27,6 @@ interface ThreeVrmState {
 }
 
 export const useThreeVrmStore = defineStore('three-vrm', () => {
-  // ---------- STATE ----------
   const state = reactive<ThreeVrmState>({
     isSceneReady: false,
     isVrmLoading: false,
@@ -35,16 +34,13 @@ export const useThreeVrmStore = defineStore('three-vrm', () => {
     error: null,
   })
 
-  // ---------- INTERNALS ----------
   function animate() {
-    if (!renderer || !scene || !camera) return
     rafId = requestAnimationFrame(animate)
+    if (!renderer || !scene || !camera) return
 
     const delta = clock.getDelta()
-    if (currentVrm) {
-      currentVrm.update(delta)
-    }
 
+    currentVrm?.update(delta)
     controls?.update()
     renderer.render(scene, camera)
   }
@@ -59,22 +55,15 @@ export const useThreeVrmStore = defineStore('three-vrm', () => {
   }
 
   function setupLights(targetScene: THREE.Scene) {
-    dirLight = new THREE.DirectionalLight(0xffffff, 1.0)
+    const dirLight = new THREE.DirectionalLight(0xffffff, 1.0)
     dirLight.position.set(1.0, 1.0, 1.0).normalize()
-    dirLight.castShadow = true
-    dirLight.shadow.mapSize.set(2048, 2048)
-    dirLight.shadow.camera.near = 0.5
-    dirLight.shadow.camera.far = 500
     targetScene.add(dirLight)
-
     const amb = new THREE.AmbientLight(0xffffff, 0.4)
     targetScene.add(amb)
   }
 
   function cleanupVrm() {
-    if (currentVrm && scene) {
-      scene.remove(currentVrm.scene)
-    }
+    if (currentVrm && scene) scene.remove(currentVrm.scene)
     if (skeletonHelper && scene) {
       scene.remove(skeletonHelper)
       skeletonHelper = null
@@ -83,22 +72,15 @@ export const useThreeVrmStore = defineStore('three-vrm', () => {
     state.isVrmReady = false
   }
 
-  // ---------- ACTIONS ----------
-
   async function init(
     canvas: HTMLCanvasElement,
-    opts?: {
-      background?: number | null
-      alpha?: boolean
-      antialias?: boolean
-    },
+    opts?: { background?: number | null; alpha?: boolean; antialias?: boolean },
   ) {
     if (state.isSceneReady) return
     state.error = null
 
     try {
       canvasEl = canvas
-
       scene = new THREE.Scene()
       if (opts?.background !== undefined) {
         if (opts.background === null) scene.background = null
@@ -106,7 +88,7 @@ export const useThreeVrmStore = defineStore('three-vrm', () => {
       }
 
       camera = new THREE.PerspectiveCamera(35, 1, 0.1, 1000)
-      camera.position.set(1.0, 3.4, 5.5)
+      camera.position.set(0.0, 1.4, 2.5)
 
       renderer = new THREE.WebGLRenderer({
         canvas,
@@ -116,21 +98,13 @@ export const useThreeVrmStore = defineStore('three-vrm', () => {
       renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
       handleResize()
 
-      renderer.shadowMap.enabled = true
-      renderer.shadowMap.type = THREE.PCFSoftShadowMap
-
       controls = new OrbitControls(camera, renderer.domElement)
       controls.screenSpacePanning = true
       controls.target.set(0.0, 1.0, 0.0)
       controls.update()
 
       setupLights(scene)
-
-      // Helpers
-      const axes = new THREE.AxesHelper(5)
-      scene.add(axes)
-      const grid = new THREE.GridHelper(10, 10)
-      scene.add(grid)
+      scene.add(new THREE.GridHelper(10, 10))
 
       resizeHandler = () => handleResize()
       window.addEventListener('resize', resizeHandler, { passive: true })
@@ -153,30 +127,61 @@ export const useThreeVrmStore = defineStore('three-vrm', () => {
 
     try {
       const loader = new GLTFLoader()
-      loader.register((parser) => {
-        return new VRMLoaderPlugin(parser)
-      })
-
+      loader.register((parser) => new VRMLoaderPlugin(parser))
       const gltf = await loader.loadAsync(url)
       const vrm = gltf.userData.vrm as VRM | undefined
       if (!vrm) throw new Error('Failed to load VRM model from gltf.userData')
 
       VRMUtils.removeUnnecessaryJoints(gltf.scene)
-
       cleanupVrm()
+
       currentVrm = vrm
-
-      currentVrm.scene.rotation.y = Math.PI
-
+      currentVrm.scene.rotation.y = ROTATE_VRM_ROOT_Y_180 ? Math.PI : 0
       currentVrm.scene.traverse((obj: any) => {
         obj.castShadow = true
-        obj.receiveShadow = true
+        obj.frustumCulled = false
       })
-
       scene.add(currentVrm.scene)
 
+      // set idle pose
+
+      if (currentVrm.humanoid) {
+        const leftUpperArm = currentVrm.humanoid.getNormalizedBoneNode(
+          VRMHumanBoneName.LeftUpperArm,
+        )
+        const rightUpperArm = currentVrm.humanoid.getNormalizedBoneNode(
+          VRMHumanBoneName.RightUpperArm,
+        )
+
+        const leftLowerArm = currentVrm.humanoid.getNormalizedBoneNode(
+          VRMHumanBoneName.LeftLowerArm,
+        )
+
+        const rightLowerArm = currentVrm.humanoid.getNormalizedBoneNode(
+          VRMHumanBoneName.RightLowerArm,
+        )
+
+        if (leftUpperArm) {
+          leftUpperArm.rotation.z = Math.PI / 2.5
+        }
+
+        if (rightUpperArm) {
+          rightUpperArm.rotation.z = -Math.PI / 2.5
+        }
+
+        if (leftLowerArm) {
+          leftLowerArm.rotation.z = Math.PI / 12
+        }
+
+        if (rightLowerArm) {
+          rightLowerArm.rotation.z = -Math.PI / 12
+        }
+      }
+
+      ///
+
       skeletonHelper = new THREE.SkeletonHelper(currentVrm.scene)
-      skeletonHelper.visible = false // по умолчанию скрыт
+      skeletonHelper.visible = false
       scene.add(skeletonHelper)
 
       state.isVrmReady = true
@@ -189,22 +194,23 @@ export const useThreeVrmStore = defineStore('three-vrm', () => {
     }
   }
 
+  function toggleSkeletonVisibility(visible?: boolean) {
+    if (!skeletonHelper) return
+    skeletonHelper.visible = visible !== undefined ? visible : !skeletonHelper.visible
+  }
+
   function dispose() {
     if (rafId) {
       cancelAnimationFrame(rafId)
       rafId = null
     }
-
     if (resizeHandler) {
       window.removeEventListener('resize', resizeHandler)
       resizeHandler = null
     }
-
     cleanupVrm()
-
     controls?.dispose()
     controls = null
-
     if (renderer) {
       renderer.dispose()
       renderer.forceContextLoss?.()
@@ -212,11 +218,9 @@ export const useThreeVrmStore = defineStore('three-vrm', () => {
     renderer = null
     camera = null
     scene = null
-
     state.isSceneReady = false
   }
 
-  // ---------- GETTERS ----------
   const getIsSceneReady = computed(() => state.isSceneReady)
   const getIsVrmLoading = computed(() => state.isVrmLoading)
   const getIsVrmReady = computed(() => state.isVrmReady)
@@ -224,15 +228,12 @@ export const useThreeVrmStore = defineStore('three-vrm', () => {
   const getCurrentVRM = computed(() => currentVrm)
 
   return {
-    //state
     state: readonly(state),
-
-    //actions
     init,
     loadVrm,
     dispose,
+    toggleSkeletonVisibility,
 
-    //getters
     getIsSceneReady,
     getIsVrmLoading,
     getIsVrmReady,

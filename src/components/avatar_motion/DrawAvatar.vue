@@ -1,41 +1,44 @@
+// FILE: components/avatar_motion/DrawAvatar.vue
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref, watch } from 'vue'
-import { useThreeVrmStore } from '@/stores/threeVrm.ts'
-import { useMediaPipeStore } from '@/stores/mediapipe.ts'
-import { calibrationArm } from '@/retarget/arm/calibration.ts'
-import type { CalibrationArmState } from '@/retarget/arm/types.ts'
-import { animate } from '@/retarget'
+import { useThreeVrmStore } from '@/stores/threeVrm'
+import { useMediaPipeStore } from '@/stores/mediapipe'
+import { HandRetargeter } from '@/retarget/handRetargeter'
 
 const canvasElement = ref<HTMLCanvasElement | null>(null)
 const vrmStore = useThreeVrmStore()
 const mediaPipeStore = useMediaPipeStore()
 
-const armCalibration = ref<CalibrationArmState | null>(null)
-
 const modelUrl = 'real.vrm'
+let handRetargeter: HandRetargeter | null = null
 
 watch(
-  () => mediaPipeStore.state.keyPoints,
-  (keyPoints) => {
-    const vrm = vrmStore.getCurrentVRM
-    const landmarks = mediaPipeStore.getWorldPoseLandmarks
-    if (vrm && landmarks) {
-      animate(vrm, armCalibration.value, landmarks)
+  () => mediaPipeStore.getPoseDataForRetargeting,
+  (poseData) => {
+    if (vrmStore.getIsVrmReady && handRetargeter) {
+      handRetargeter.update(
+        {
+          worldLandmarks: poseData.correctedWorldLandmarks,
+          screenLandmarks: poseData.screenLandmarks,
+        },
+        0.2,
+      ) // Порог можно задать здесь
     }
   },
   { deep: true },
 )
-
 onMounted(async () => {
   if (!canvasElement.value) return
 
-  await vrmStore.init(canvasElement.value, { background: null })
+  await vrmStore.init(canvasElement.value, { background: 0x222222 })
   await vrmStore.loadVrm(modelUrl)
 
   if (vrmStore.getError == null) {
-    armCalibration.value = calibrationArm(vrmStore.getCurrentVRM)
+    vrmStore.toggleSkeletonVisibility(true)
+
+    handRetargeter = new HandRetargeter(vrmStore.getCurrentVRM)
   } else {
-    console.log(vrmStore.getError)
+    console.error(vrmStore.getError)
   }
 })
 
