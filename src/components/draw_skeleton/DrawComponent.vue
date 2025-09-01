@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { useMediaPipeStore } from '@/stores/mediapipe.ts'
-import { POSE_CONNECTIONS, type Landmark } from '@mediapipe/holistic'
+import { HAND_CONNECTIONS, type Landmark, POSE_CONNECTIONS } from '@mediapipe/holistic'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls'
 
@@ -40,6 +40,8 @@ let camera: THREE.PerspectiveCamera
 let renderer: THREE.WebGLRenderer
 let controls: OrbitControls
 let skeletonGroup: THREE.Group
+let leftHandGroup: THREE.Group
+let rightHandGroup: THREE.Group
 
 const FLIP_X = false
 const FLIP_Y = true
@@ -70,7 +72,11 @@ const initThree = (canvas: HTMLCanvasElement) => {
   scene.add(new THREE.GridHelper(10, 10))
 
   skeletonGroup = new THREE.Group()
+  leftHandGroup = new THREE.Group()
+  rightHandGroup = new THREE.Group()
   scene.add(skeletonGroup)
+  scene.add(leftHandGroup)
+  scene.add(rightHandGroup)
 
   const animate = () => {
     threeAnimationId = requestAnimationFrame(animate)
@@ -80,34 +86,36 @@ const initThree = (canvas: HTMLCanvasElement) => {
   animate()
 }
 
-const updateSkeleton3D = (landmarks: Landmark[]) => {
-  while (skeletonGroup.children.length) {
-    const child = skeletonGroup.children[0]
-    skeletonGroup.remove(child)
-    // Убедимся, что геометрии и материалы тоже удаляются, чтобы избежать утечек памяти
+const landmarkToVector3 = (lm: Landmark): THREE.Vector3 => {
+  return new THREE.Vector3(FLIP_X ? -lm.x : lm.x, FLIP_Y ? -lm.y : lm.y, FLIP_Z ? -lm.z : lm.z)
+}
+
+const clearGroup = (group: THREE.Group) => {
+  while (group.children.length) {
+    const child = group.children[0]
+    group.remove(child)
     if (child instanceof THREE.Mesh || child instanceof THREE.Line) {
       child.geometry.dispose()
       if (Array.isArray(child.material)) {
-        child.material.forEach(m => m.dispose())
+        child.material.forEach((m) => m.dispose())
       } else {
         child.material.dispose()
       }
     }
   }
+}
+
+const updateSkeleton3D = (landmarks: Landmark[]) => {
+  clearGroup(skeletonGroup)
 
   if (!landmarks || landmarks.length === 0) return
 
-  const threePoints: THREE.Vector3[] = landmarks.map(lm => new THREE.Vector3(
-    FLIP_X ? -lm.x : lm.x,
-    FLIP_Y ? -lm.y : lm.y,
-    FLIP_Z ? -lm.z : lm.z,
-  ))
+  const threePoints: THREE.Vector3[] = landmarks.map(landmarkToVector3)
 
   const pointGeometry = new THREE.SphereGeometry(0.015, 16, 16)
   const bodyMaterial = new THREE.MeshStandardMaterial({ color: '#FFD700' }) // Gold
   const leftHandMaterial = new THREE.MeshStandardMaterial({ color: '#00BFFF' }) // DeepSkyBlue
   const rightHandMaterial = new THREE.MeshStandardMaterial({ color: '#00FF00' }) // Lime
-
 
   threePoints.forEach((pos, i) => {
     let material = bodyMaterial
@@ -137,6 +145,75 @@ const updateSkeleton3D = (landmarks: Landmark[]) => {
   drawConnections(POSE_HAND_CONNECTIONS_RIGHT, '#00FF00')
 }
 
+const updateHand3D = (
+  landmarks: Landmark[] | undefined,
+  group: THREE.Group,
+  color: THREE.ColorRepresentation,
+  wristWorldPos?: THREE.Vector3,
+) => {
+  clearGroup(group)
+
+  if (!landmarks || landmarks.length === 0) return
+
+  const threePoints: THREE.Vector3[] = landmarks.map(landmarkToVector3)
+
+  if (wristWorldPos) {
+    const handWristPos = threePoints[0] // Первая точка в hand landmarks - это запястье
+    const offset = wristWorldPos.clone().sub(handWristPos)
+
+    threePoints.forEach((point) => {
+      point.add(offset)
+    })
+  }
+
+  const jointGeometry = new THREE.SphereGeometry(0.008, 12, 12)
+  const jointMaterial = new THREE.MeshStandardMaterial({
+    color,
+    emissive: color,
+    emissiveIntensity: 0.2,
+  })
+
+  threePoints.forEach((pos) => {
+    const sphere = new THREE.Mesh(jointGeometry, jointMaterial)
+    sphere.position.copy(pos)
+    group.add(sphere)
+  })
+
+  const lineMaterial = new THREE.LineBasicMaterial({
+    color,
+    linewidth: 2,
+    opacity: 0.8,
+    transparent: true,
+  })
+
+  for (const conn of HAND_CONNECTIONS) {
+    const start = threePoints[conn[0]]
+    const end = threePoints[conn[1]]
+    if (start && end) {
+      const lineGeometry = new THREE.BufferGeometry().setFromPoints([start, end])
+      const line = new THREE.Line(lineGeometry, lineMaterial)
+      group.add(line)
+    }
+  }
+
+  const tipIndices = [4, 8, 12, 16, 20] // Кончики: большой, указательный, средний, безымянный, мизинец
+  const tipGeometry = new THREE.SphereGeometry(0.01, 12, 12)
+  const tipMaterial = new THREE.MeshStandardMaterial({
+    color: '#FFFFFF',
+    emissive: color,
+    emissiveIntensity: 0.5,
+  })
+
+  tipIndices.forEach((index) => {
+    const tipPos = threePoints[index]
+    if (tipPos) {
+      const tipSphere = new THREE.Mesh(tipGeometry, tipMaterial)
+      tipSphere.position.copy(tipPos)
+      group.add(tipSphere)
+    }
+  })
+}
+
 const processVideo = () => {
   if (videoElement.value && videoElement.value.readyState >= 3) {
     mediaPipeStore.processFrame(videoElement.value)
@@ -154,6 +231,36 @@ watch(
   { deep: true },
 )
 
+watch(
+  () => mediaPipeStore.getLeftHandLandmarks,
+  (landmarks) => {
+    const poseLandmarks = mediaPipeStore.getCorrectedWorldPoseLandmarks
+    let wristPos: THREE.Vector3 | undefined
+
+    if (poseLandmarks && poseLandmarks.length > POSE_LANDMARK_INDICES.LEFT_WRIST) {
+      wristPos = landmarkToVector3(poseLandmarks[POSE_LANDMARK_INDICES.LEFT_WRIST])
+    }
+
+    updateHand3D(landmarks, leftHandGroup, '#00BFFF', wristPos)
+  },
+  { deep: true },
+)
+
+watch(
+  () => mediaPipeStore.getRightHandLandmarks,
+  (landmarks) => {
+    const poseLandmarks = mediaPipeStore.getCorrectedWorldPoseLandmarks
+    let wristPos: THREE.Vector3 | undefined
+
+    if (poseLandmarks && poseLandmarks.length > POSE_LANDMARK_INDICES.RIGHT_WRIST) {
+      wristPos = landmarkToVector3(poseLandmarks[POSE_LANDMARK_INDICES.RIGHT_WRIST])
+    }
+
+    updateHand3D(landmarks, rightHandGroup, '#00FF00', wristPos)
+  },
+  { deep: true },
+)
+
 onMounted(async () => {
   if (canvasElement.value) {
     initThree(canvasElement.value)
@@ -161,7 +268,9 @@ onMounted(async () => {
   await mediaPipeStore.initialize()
   if (mediaPipeStore.getIsReady && videoElement.value) {
     try {
-      videoElement.value.srcObject = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } })
+      videoElement.value.srcObject = await navigator.mediaDevices.getUserMedia({
+        video: { width: 640, height: 480 },
+      })
       videoElement.value.onloadeddata = () => processVideo()
     } catch (e) {
       console.error('Error while initializing media stream:', e)
@@ -190,6 +299,7 @@ onUnmounted(() => {
 video {
   display: none;
 }
+
 canvas {
   width: 100%;
   height: 100%;

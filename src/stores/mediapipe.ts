@@ -97,17 +97,23 @@ export const useMediaPipeStore = defineStore('mediapipe', () => {
   const getPoseDataForRetargeting = computed(() => {
     const worldLandmarks = state.keyPoints?.za
     const screenLandmarks = state.keyPoints?.poseLandmarks
+    const leftHandLandmarks = state.keyPoints?.leftHandLandmarks
+    const rightHandLandmarks = state.keyPoints?.rightHandLandmarks
 
     if (!worldLandmarks || !screenLandmarks) {
       return {
         correctedWorldLandmarks: [],
         screenLandmarks: [],
+        leftHandLandmarks: [],
+        rightHandLandmarks: [],
       }
     }
 
     return {
       correctedWorldLandmarks: applyPoseCorrections(worldLandmarks),
       screenLandmarks: screenLandmarks,
+      leftHandLandmarks: leftHandLandmarks,
+      rightHandLandmarks: rightHandLandmarks,
     }
   })
 
